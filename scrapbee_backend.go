@@ -22,6 +22,7 @@ import (
   "os/exec"
   "runtime"
   "github.com/gorilla/mux"
+
 )
 
 var config map[string]interface{}
@@ -199,7 +200,7 @@ func start_web_server(addr string) {
   }()
   time.Sleep(time.Duration(2) * time.Second)
   m := Message{"0", "0", "0", "0", "0", "0"}
-  m.Version = "1.7.1"
+  m.Version = "1.7.2"
   m.Serverstate = "ok"
   m.Serveraddr = addr
   // defer srv.Shutdown(nil)
@@ -239,7 +240,7 @@ func isFileHandle(w http.ResponseWriter, r *http.Request){
 func rootFsHandle(w http.ResponseWriter, r *http.Request){
   params := mux.Vars(r)
   path := params["path"]
-  if runtime.GOOS == "linux" || runtime.GOOS == "darwin"{
+  if runtime.GOOS != "windows" { // darwin, linux, freebsd ...
     path = "/" + path
   }
   // logger.Printf("name %s \n", path)
@@ -285,11 +286,17 @@ func fsCopyHandle(w http.ResponseWriter, r *http.Request){
   w.Header().Add("Content-Type", "text/plain")
   src := r.FormValue("src")
   dest := r.FormValue("dest")
-  err := copyFsNode(src, dest)
-  if err != nil {
-    io.WriteString(w, err.Error())
+  destpath := filepath.Dir(dest)
+  err := CreateDir(destpath)
+  if err == nil {
+    err := copyFsNode(src, dest)
+    if err == nil {
+      io.WriteString(w, "ok")
+    }else{
+      resp500(w, err)
+    }
   }else{
-    io.WriteString(w, "ok")
+    resp500(w, err)
   }
 }
 
