@@ -1,5 +1,6 @@
 package main
 import (
+  "context"
 	"fmt"
 	"net/http"
 	"time"
@@ -18,11 +19,11 @@ import (
   // "crypto/sha1"
   // "mime"
   // "path"
+  "errors"
   "path/filepath"
   "os/exec"
   "runtime"
   "github.com/gorilla/mux"
-
 )
 
 var config map[string]interface{}
@@ -34,6 +35,12 @@ var logger *log.Logger
 var fs_root http.Handler
 var fs_data http.Handler
 var srv *http.Server
+
+var web_addr string
+var web_err error
+var web_pwd string = ""
+
+var version string = "1.7.3"
 
 func IsFile(name string) bool {
   fi, err := os.Stat(name)
@@ -72,11 +79,13 @@ func resp500(w http.ResponseWriter, err error){
 }
 
 func saveFileHandle(w http.ResponseWriter, r *http.Request){
+  if checkPwd(w, r) == 0 {return}
   if r.Method == "POST" {
     filename := r.FormValue("filename")
     content := r.FormValue("content")
-    downloadpath := filepath.Dir(filename)
-    err := CreateDir(downloadpath)
+    path := filepath.Dir(filename)
+    logger.Println(path)
+    err := CreateDir(path)
     if err == nil {
       f, err := os.Create(filename)
       if err != nil {
@@ -91,6 +100,7 @@ func saveFileHandle(w http.ResponseWriter, r *http.Request){
 }
 
 func saveBinFileHandle(w http.ResponseWriter, r *http.Request){
+  if checkPwd(w, r) == 0 {return}
   w.Header().Add("Content-Type", "text/plain")
   file, _, _ := r.FormFile("file") 
   defer file.Close()
@@ -109,7 +119,6 @@ func saveBinFileHandle(w http.ResponseWriter, r *http.Request){
     _, err = io.Copy(fW, file)
     if err != nil {
       resp500(w, err)
-      return
     }
     // logger.Println("File saved successful")
   }else{
@@ -118,6 +127,7 @@ func saveBinFileHandle(w http.ResponseWriter, r *http.Request){
 }
 
 func downloadHandle(w http.ResponseWriter, r *http.Request) {
+  if checkPwd(w, r) == 0 {return}
 	w.Header().Set("Access-Control-Allow-Origin", "*")
   w.Header().Add("Content-Type", "text/plain")
   if r.Method == "GET" {
@@ -137,7 +147,7 @@ func downloadHandle(w http.ResponseWriter, r *http.Request) {
           f := downloadBase64(m[2], filename, m[1])
           io.WriteString(w, f)
         } else {
-          logger.Printf("found and download url: %s %s\n", url) // %q
+          logger.Printf("found and download url: %s %s\r\n", url) // %q
           f := downlaodFile(url, filename)
           io.WriteString(w, f)
         }
@@ -179,12 +189,24 @@ func downlaodFile(url string, filepath string) string{
 	return filepath
 }
 
-func start_web_server(addr string) {
-  logger.Print("start server\n")
+func logMessage(message string, printAsWell bool){
+  // fmt.Printf / fmt.Println / fmt.Sprint
+  logger.Println(message)
+  if printAsWell {
+    fmt.Println(message)  
+  }
+}
+
+func startWebServer(addr string, outputJson bool) {
+  logMessage(fmt.Sprintf("Create web server on address %s", addr), !outputJson)
+  
   if srv != nil {
-    if srv.Addr != addr {
-      srv.Shutdown(nil)
-    }
+    // if srv.Addr == addr {
+    srv.Shutdown(context.TODO())
+    // srv.Close()
+    srv = nil
+    web_err = nil
+    // }
   }
   srv = &http.Server{
     Addr:           addr,
@@ -193,28 +215,56 @@ func start_web_server(addr string) {
     WriteTimeout:   10 * time.Second,
     MaxHeaderBytes: 1 << 20,
   }
-  logger.Println("Try to start Server and hold")
-  var err error
+  logMessage("Start Server and hold", !outputJson)
+
   go func() {
-    err = srv.ListenAndServe() // waiting...
+    web_err = srv.ListenAndServe() // waiting...
   }()
-  time.Sleep(time.Duration(2) * time.Second)
-  m := Message{"0", "0", "0", "0", "0", "0"}
-  m.Version = "1.7.2"
-  m.Serverstate = "ok"
-  m.Serveraddr = addr
+  
   // defer srv.Shutdown(nil)
-  if err != nil {
-    logger.Println(fmt.Sprintf("Listen Error: %s", err))
+  if web_err != nil {
+    logMessage(fmt.Sprintf("Listen Error: %s", web_err), !outputJson)
+  }
+  
+  time.Sleep(time.Duration(1) * time.Second)
+  web_addr = addr
+  if outputJson {
+    outputServerInfo()
+  }
+
+  // logMessage("Web server started", !outputJson)
+}
+
+func outputServerInfo() {
+  m := Message{"0", "0", "0", "0", "0", "0"}
+  m.Version = version
+  m.Serverstate = "ok"
+  m.Serveraddr = web_addr
+  if web_err != nil {
     m.Serverstate = "fail"
-    m.Error = err.Error()
+    m.Error = web_err.Error()
   }
   b, _ := json.Marshal(m)
   sendMsgBytes(b)
-  logger.Println("Server Started")
+}
+
+func serverInfoHandle(w http.ResponseWriter, r *http.Request){
+  if checkPwd(w, r) == 0 {return}
+  w.Header().Add("Content-Type", "text/json")
+  m := Message{"0", "0", "0", "0", "0", "0"}
+  m.Version = version
+  m.Serverstate = "ok"
+  m.Serveraddr = web_addr
+  if web_err != nil {
+    m.Serverstate = "fail"
+    m.Error = web_err.Error()
+  }
+  b, _ := json.Marshal(m)
+  io.WriteString(w, string(b))
 }
 
 func deleteDirHandle(w http.ResponseWriter, r *http.Request){
+  if checkPwd(w, r) == 0 {return}
   w.Header().Add("Content-Type", "text/plain")
   if r.FormValue("path") == "" {
     return
@@ -227,6 +277,7 @@ func deleteDirHandle(w http.ResponseWriter, r *http.Request){
 }
 
 func isFileHandle(w http.ResponseWriter, r *http.Request){
+  if checkPwd(w, r) == 0 {return}
   w.Header().Add("Content-Type", "text/plain")
   path := r.FormValue("path")
   b := "no"
@@ -237,9 +288,41 @@ func isFileHandle(w http.ResponseWriter, r *http.Request){
   io.WriteString(w, b)
 }
 
+func checkPwd(w http.ResponseWriter, r *http.Request) (int){
+  if web_pwd != "" {
+    pwd := r.FormValue("pwd") // from GET or POST or put ...
+    // pwd := ""
+    // if r.Method == "GET"{
+    //   query := r.URL.Query()
+    //   pwd = query.Get("pwd")
+    // }else{
+    //   // POST, GET, PUT and etc (for all requests):
+    //   err := r.ParseForm()
+    //   if err != nil {
+    //     // in case of any error
+    //   }else{
+    //     pwd = r.Form.Get("pwd")
+    //     logger.Println(fmt.Sprintf("get pwd : %s",pwd))
+    //   }
+    // }
+    if pwd != web_pwd {
+      resp500(w, errors.New(fmt.Sprintf("WRONG PASSWORD")))
+      return 0
+    }
+  }
+  return 1
+}
+
 func rootFsHandle(w http.ResponseWriter, r *http.Request){
   params := mux.Vars(r)
   path := params["path"]
+  pwd := params["pwd"]
+  if web_pwd != "" {
+    if pwd != web_pwd {
+      resp500(w, errors.New(fmt.Sprintf("WRONG PASSWORD")))
+      return
+    }
+  }
   if runtime.GOOS != "windows" { // darwin, linux, freebsd ...
     path = "/" + path
   }
@@ -248,19 +331,22 @@ func rootFsHandle(w http.ResponseWriter, r *http.Request){
 }
 
 func dataFsHandle(w http.ResponseWriter, r *http.Request){
+  if checkPwd(w, r) == 0 {return}
   rp := r.FormValue("rdf_path")
   f := filepath.Join(rp, "data", strings.TrimPrefix(r.URL.Path, "/data"))
   http.ServeFile(w, r, f)
 }
 
 func setRdfPathHandle(w http.ResponseWriter, r *http.Request){
+  if checkPwd(w, r) == 0 {return}
   w.Header().Add("Content-Type", "text/plain")
   rdf_path := r.FormValue("path")
-  logger.Printf("switch to rdf path %s \n", rdf_path)
+  logger.Printf("switch to rdf path %s \r\n", rdf_path)
   // io.WriteString(w, "ok")
 }
 
 func fileManagerHandle(w http.ResponseWriter, r *http.Request){
+  if checkPwd(w, r) == 0 {return}
   w.Header().Add("Content-Type", "text/plain")
   p := r.FormValue("path")
   var err error
@@ -283,6 +369,7 @@ func fileManagerHandle(w http.ResponseWriter, r *http.Request){
 }
 
 func fsCopyHandle(w http.ResponseWriter, r *http.Request){
+  if checkPwd(w, r) == 0 {return}
   w.Header().Add("Content-Type", "text/plain")
   src := r.FormValue("src")
   dest := r.FormValue("dest")
@@ -301,6 +388,7 @@ func fsCopyHandle(w http.ResponseWriter, r *http.Request){
 }
 
 func fsMoveHandle(w http.ResponseWriter, r *http.Request){
+  if checkPwd(w, r) == 0 {return}
   w.Header().Add("Content-Type", "text/plain")
   src := r.FormValue("src")
   dest := r.FormValue("dest")
@@ -317,6 +405,8 @@ func fsMoveHandle(w http.ResponseWriter, r *http.Request){
 
 /* ========== MAIN ENTRIES ========== */
 func main(){
+  print(fmt.Sprintf("ScrapBee %s\n", version))
+  
   /** log */
 	logfile,err:=os.OpenFile("scrapbee_backend.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
   if err!=nil{
@@ -325,11 +415,13 @@ func main(){
   }
   defer logfile.Close()
   logger = log.New(logfile,"",log.Ldate|log.Ltime|log.Lshortfile)
-  logger.Println("start backend\n")
+  logger.Println("Start backend")
+  
   /** handles by mux */
   rtr := mux.NewRouter()
-  rtr.HandleFunc("/file-service/{path:.+}", rootFsHandle).Methods("GET")
+  rtr.HandleFunc("/file-service/pwd/{pwd:\\w+}/{path:.+}", rootFsHandle).Methods("GET")
   http.Handle("/", rtr)
+  
   /** handles by http */
   http.HandleFunc("/isfile/", isFileHandle)
   http.HandleFunc("/deletedir/", deleteDirHandle)
@@ -339,10 +431,24 @@ func main(){
   http.HandleFunc("/savebinfile", saveBinFileHandle)
   http.HandleFunc("/fs/copy", fsCopyHandle)
   http.HandleFunc("/fs/move", fsMoveHandle)
-  /** commmand line args */  
-  if len(os.Args) == 2 && os.Args[1] == "web-server" {
-    go start_web_server("127.0.0.1:9900")
-    // return
+  http.HandleFunc("/serverinfo/", serverInfoHandle)
+
+  /** commmand line args */
+  if len(os.Args) > 1 && os.Args[1] == "web-server" {
+    port := "9900";
+    host := "127.0.0.1"
+    if len(os.Args) > 2 {
+      port = os.Args[2]
+    }
+    if len(os.Args) > 3 {
+      host = os.Args[3]
+    }
+    if len(os.Args) > 4 {
+      web_pwd = os.Args[4]
+      fmt.Printf("Password setted: %s\r\n", web_pwd)
+    }
+    addr := fmt.Sprintf("%s:%s", host, port);
+    go startWebServer(addr, false)
   } else if len(os.Args) == 2 && os.Args[1] == "init" {
 		// initBackend ()
 		return
@@ -360,22 +466,28 @@ func main(){
       }
       // logger.Println(unscaped_str)
       /**** un-stringify the json string */
-      var myjson map[string]string
-      if err := json.Unmarshal([]byte(unscaped_str), &myjson); err != nil {
+      var message map[string]string
+      if err := json.Unmarshal([]byte(unscaped_str), &message); err != nil {
         logger.Println(fmt.Sprintf("Unmarshal error: %s", err.Error()))
         continue
       }
-      // logger.Println(fmt.Sprintf("msgid=%s", myjson["msgid"]))
+      // logger.Println(fmt.Sprintf("msgid=%s", message["msgid"]))
       /**** process commands */
-      command := myjson["command"]
-      logger.Println(fmt.Sprintf("command=%s", command))
+      command := message["command"]
+      logger.Println(fmt.Sprintf("Message: command = %s", command))
       if command == "web-server" {
-        addr := myjson["addr"]
+        addr := message["addr"]
         if addr == "" {
-          port := myjson["port"]
+          port := message["port"]
           addr = fmt.Sprintf("127.0.0.1:%s", port);
         }
-        go start_web_server(addr)
+        if pwd, ok := message["pwd"]; ok {
+          web_pwd = pwd
+          if pwd != "" {
+            logger.Println(fmt.Sprintf("Password setted: %s", web_pwd))
+          }
+        }        
+        go startWebServer(addr, true)
       }
     }
 	}
