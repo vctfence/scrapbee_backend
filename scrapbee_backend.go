@@ -445,7 +445,7 @@ func main(){
     }
     if len(os.Args) > 4 {
       web_pwd = os.Args[4]
-      fmt.Printf("Password setted: %s\r\n", web_pwd)
+      fmt.Printf("Password set: %s\r\n", web_pwd)
     }
     addr := fmt.Sprintf("%s:%s", host, port);
     go startWebServer(addr, false)
@@ -484,7 +484,7 @@ func main(){
         if pwd, ok := message["pwd"]; ok {
           web_pwd = pwd
           if pwd != "" {
-            logger.Println(fmt.Sprintf("Password setted: %s", web_pwd))
+            logger.Println(fmt.Sprintf("Password set: %s", web_pwd))
           }
         }        
         go startWebServer(addr, true)
