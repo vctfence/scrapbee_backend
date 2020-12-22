@@ -24,6 +24,10 @@ import (
   "os/exec"
   "runtime"
   "github.com/gorilla/mux"
+  // "flag"
+  // "runtime/pprof"
+  // "os/signal"
+  // "syscall"
 )
 
 var config map[string]interface{}
@@ -40,7 +44,8 @@ var web_addr string
 var web_err error
 var web_pwd string = ""
 
-var version string = "1.7.3"
+var version string = "1.7.4"
+// var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
 
 func IsFile(name string) bool {
   fi, err := os.Stat(name)
@@ -405,6 +410,32 @@ func fsMoveHandle(w http.ResponseWriter, r *http.Request){
 
 /* ========== MAIN ENTRIES ========== */
 func main(){
+  // flag.Parse()
+  // if *cpuprofile != "" {
+  //   f, err := os.Create(*cpuprofile)
+  //   if err != nil {
+  //     log.Fatal(err)
+  //   }
+  //   // pprof.NoShutdownHook(*cpuprofile)
+  //   // defer f.Close()
+  //   pprof.StartCPUProfile(f)
+  //   defer pprof.StopCPUProfile()
+
+  //   c := make(chan os.Signal, 2)                    
+  //   signal.Notify(c, os.Interrupt, syscall.SIGTERM) // subscribe to system signals
+  //   onKill := func(c chan os.Signal) {
+  
+  //     select {
+  //     case <-c:
+  //       // defer f.Close()
+  //       pprof.StopCPUProfile()
+  //       defer os.Exit(0)
+  //     }
+  //   }
+  //   // try to handle os interrupt(signal terminated)
+  //   go onKill(c)
+  // }  
+  
   print(fmt.Sprintf("ScrapBee %s\n", version))
   
   /** log */
@@ -433,40 +464,43 @@ func main(){
   http.HandleFunc("/fs/move", fsMoveHandle)
   http.HandleFunc("/serverinfo/", serverInfoHandle)
 
+  arg_start := 1
   /** commmand line args */
-  if len(os.Args) > 1 && os.Args[1] == "web-server" {
+  if len(os.Args) > 1 + arg_start && os.Args[1 + arg_start] == "web-server" {
     port := "9900";
     host := "127.0.0.1"
-    if len(os.Args) > 2 {
-      port = os.Args[2]
+    if len(os.Args) > 2 + arg_start {
+      port = os.Args[2 + arg_start]
     }
-    if len(os.Args) > 3 {
-      host = os.Args[3]
+    if len(os.Args) > 3 + arg_start {
+      host = os.Args[3 + arg_start]
     }
-    if len(os.Args) > 4 {
-      web_pwd = os.Args[4]
+    if len(os.Args) > 4 + arg_start{
+      web_pwd = os.Args[4 + arg_start]
       fmt.Printf("Password set: %s\r\n", web_pwd)
     }
     addr := fmt.Sprintf("%s:%s", host, port);
     go startWebServer(addr, false)
-  } else if len(os.Args) == 2 && os.Args[1] == "init" {
-		// initBackend ()
-		return
-	}
-	var msg []byte
+  }
+	// var msg []byte
+  var message map[string]string
+  var buf []byte = make([]byte, 1024)
+  var lenMsg int;
 	for {   /** main loop for message interface */
     time.Sleep(time.Duration(1) * time.Second)
-		msg = getMsg()
-    if string(msg) != "" {
+
+    lenMsg = getMsg(buf)
+    if lenMsg > 0 {
+      // msg = buf[1:lenMsg]
       // logger.Println(fmt.Sprintf("json string: %s", string(msg)))
-      unscaped_str, err := strconv.Unquote("\"" + string(msg) + "\"")
+      unscaped_str, err := strconv.Unquote("\"" + string(buf[1:lenMsg]) + "\"")
       if err != nil {
         logger.Println(fmt.Sprintf("Unquote error: %s", err.Error()))
         continue
       }
       // logger.Println(unscaped_str)
       /**** un-stringify the json string */
-      var message map[string]string
+      
       if err := json.Unmarshal([]byte(unscaped_str), &message); err != nil {
         logger.Println(fmt.Sprintf("Unmarshal error: %s", err.Error()))
         continue
@@ -493,6 +527,27 @@ func main(){
 	}
 }
 
+
+func getMsg (b []byte) int{
+	inputReader := bufio.NewReader(os.Stdin)	
+  // s, err := inputReader.Peek(4)  
+	for {
+		s, err := inputReader.Peek(4)
+    if err != nil{
+      // logger.Println(fmt.Sprintf("Error %s", err))
+      // b := make([]byte, 0)
+      continue
+    }
+		if s[0] > 0 {
+			inputReader.Discard(4)
+			// b := make([]byte, s[0])
+			_, _ = inputReader.Read(b)
+			// return b[1:len(b)-1]
+      return int(s[0]) - 1
+		}
+	}
+}
+
 type Message struct {
   Version string
 	Rdfloaded string
@@ -508,25 +563,6 @@ func sendMsgBytes (arr []byte) {
 	// fmt.Println("s:", []byte(s), "a:", a, " arr:", arr, " len(arr): ", len(arr)>>8, " cap(arr): ", cap(arr), " l: ", l)
 	os.Stdout.Write(l);
 	os.Stdout.Write(arr);
-}
-
-func getMsg () []byte{
-	inputReader := bufio.NewReader(os.Stdin)	
-  // s, err := inputReader.Peek(4)  
-	for {
-		s, err := inputReader.Peek(4)
-    if err != nil{
-      // logger.Println(fmt.Sprintf("Error %s", err))
-      // b := make([]byte, 0)
-      continue
-    }
-		if s[0] > 0 {
-			inputReader.Discard(4)
-			b := make([]byte, s[0])
-			_, _ = inputReader.Read(b)
-			return b[1:len(b)-1]
-		}
-	}
 }
 
 /* copy folder */
