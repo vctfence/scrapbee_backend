@@ -44,7 +44,7 @@ var web_addr string
 var web_err error
 var web_pwd string = ""
 
-var version string = "1.7.4"
+var version string = "1.7.5"
 // var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
 
 func IsFile(name string) bool {
@@ -464,7 +464,7 @@ func main(){
   http.HandleFunc("/fs/move", fsMoveHandle)
   http.HandleFunc("/serverinfo/", serverInfoHandle)
 
-  arg_start := 1
+  arg_start := 0
   /** commmand line args */
   if len(os.Args) > 1 + arg_start && os.Args[1 + arg_start] == "web-server" {
     port := "9900";
