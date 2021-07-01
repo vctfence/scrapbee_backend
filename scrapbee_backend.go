@@ -9,7 +9,7 @@ import (
 	"io"
 	// "io/ioutil"  
   "log"
-  "strings"
+  // "strings"
   "encoding/json"
   "strconv"
   "regexp"
@@ -44,16 +44,16 @@ var web_addr string
 var web_err error
 var web_pwd string = ""
 
-var version string = "1.7.5"
+var version string = "1.7.6"
 // var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
 
-func IsFile(name string) bool {
+func isFile(name string) (bool, error) {
   fi, err := os.Stat(name)
   if err != nil {
-    return false
+    return false, err
   }
   mode := fi.Mode()
-  return mode.IsRegular()
+  return mode.IsRegular(), nil
 }
 
 func isDir(name string) (bool, error) {
@@ -62,11 +62,9 @@ func isDir(name string) (bool, error) {
     return false, err
   }
   return fi.IsDir(), nil
-  // mode := fi.Mode()
-  // return mode.IsRegular()
 }
 
-func CreateDir(name string) error {
+func createDir(name string) error {
   is, err := isDir(name) 
   if is{
     return nil
@@ -90,7 +88,7 @@ func saveFileHandle(w http.ResponseWriter, r *http.Request){
     content := r.FormValue("content")
     path := filepath.Dir(filename)
     logger.Println(path)
-    err := CreateDir(path)
+    err := createDir(path)
     if err == nil {
       f, err := os.Create(filename)
       if err != nil {
@@ -113,7 +111,7 @@ func saveBinFileHandle(w http.ResponseWriter, r *http.Request){
   // logger.Printf("%q", head)
   filename := r.FormValue("filename")
   downloadpath := filepath.Dir(filename)
-  err := CreateDir(downloadpath)
+  err := createDir(downloadpath)
   if err == nil {
     fW, err := os.Create(filename)
     if err != nil {
@@ -143,7 +141,7 @@ func downloadHandle(w http.ResponseWriter, r *http.Request) {
     filename := r.FormValue("filename")
     downloadpath := filepath.Dir(filename)
     logger.Println(downloadpath)
-    err := CreateDir(downloadpath)
+    err := createDir(downloadpath)
     if err == nil {				
       if len(url) > 0 {
         reg, _ := regexp.Compile(`(?i)^data:image/(.+?);base64,(.+)`)
@@ -286,7 +284,8 @@ func isFileHandle(w http.ResponseWriter, r *http.Request){
   w.Header().Add("Content-Type", "text/plain")
   path := r.FormValue("path")
   b := "no"
-  if IsFile(path) {
+  is, err := isFile(path) 
+  if is && (err == nil) {
     b = "yes"
   }
   // logger.Printf("%s %s\n", path, b)
@@ -331,16 +330,27 @@ func rootFsHandle(w http.ResponseWriter, r *http.Request){
   if runtime.GOOS != "windows" { // darwin, linux, freebsd ...
     path = "/" + path
   }
-  // logger.Printf("name %s \n", path)
-  http.ServeFile(w, r, path)
+  logger.Printf("name %s \n", path)
+  is, _ := isFile(path)
+  if !is {
+    http.NotFound(w, r)
+    return
+  }
+  f, err := os.Open(path)
+  if err != nil {
+    resp500(w, err)
+    return
+  }
+  http.ServeContent(w, r, path, time.Now(), f)
+  // http.ServeFile(w, r, path)
 }
 
-func dataFsHandle(w http.ResponseWriter, r *http.Request){
-  if checkPwd(w, r) == 0 {return}
-  rp := r.FormValue("rdf_path")
-  f := filepath.Join(rp, "data", strings.TrimPrefix(r.URL.Path, "/data"))
-  http.ServeFile(w, r, f)
-}
+// func dataFsHandle(w http.ResponseWriter, r *http.Request){
+//   if checkPwd(w, r) == 0 {return}
+//   rp := r.FormValue("rdf_path")
+//   f := filepath.Join(rp, "data", strings.TrimPrefix(r.URL.Path, "/data"))
+//   http.ServeFile(w, r, f)
+// }
 
 func setRdfPathHandle(w http.ResponseWriter, r *http.Request){
   if checkPwd(w, r) == 0 {return}
@@ -379,7 +389,7 @@ func fsCopyHandle(w http.ResponseWriter, r *http.Request){
   src := r.FormValue("src")
   dest := r.FormValue("dest")
   destpath := filepath.Dir(dest)
-  err := CreateDir(destpath)
+  err := createDir(destpath)
   if err == nil {
     err := copyFsNode(src, dest)
     if err == nil {
@@ -436,7 +446,7 @@ func main(){
   //   go onKill(c)
   // }  
   
-  print(fmt.Sprintf("ScrapBee %s\n", version))
+  print(fmt.Sprintf("ScrapBee Backend %s\n", version))
   
   /** log */
 	logfile,err:=os.OpenFile("scrapbee_backend.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
@@ -463,7 +473,6 @@ func main(){
   http.HandleFunc("/fs/copy", fsCopyHandle)
   http.HandleFunc("/fs/move", fsMoveHandle)
   http.HandleFunc("/serverinfo/", serverInfoHandle)
-
   arg_start := 0
   /** commmand line args */
   if len(os.Args) > 1 + arg_start && os.Args[1 + arg_start] == "web-server" {
