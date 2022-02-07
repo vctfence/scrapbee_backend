@@ -28,6 +28,7 @@ import (
   // "runtime/pprof"
   // "os/signal"
   // "syscall"
+  "strings"
 )
 
 var config map[string]interface{}
@@ -44,8 +45,29 @@ var web_addr string
 var web_err error
 var web_pwd string = ""
 
-var version string = "1.7.6"
+var version string = "1.7.7"
 // var cpuprofile = flag.String("cpuprofile", "", "write cpu profile to file")
+
+
+func GetCurrentPath() (string, error) {
+	file, err := exec.LookPath(os.Args[0])
+	if err != nil {
+		return "", err
+	}
+	path, err := filepath.Abs(file)
+	if err != nil {
+		return "", err
+	}
+	i := strings.LastIndex(path, "/")
+	if i < 0 {
+		i = strings.LastIndex(path, "\\")
+	}
+	if i < 0 {
+		return "", errors.New(`error: Can't find "/" or "\".`)
+	}
+	return string(path[0 : i+1]), nil
+}
+
 
 func isFile(name string) (bool, error) {
   fi, err := os.Stat(name)
@@ -444,13 +466,21 @@ func main(){
   //   }
   //   // try to handle os interrupt(signal terminated)
   //   go onKill(c)
-  // }  
-  
+  // }
+
+  execPath, err := GetCurrentPath()
+  if err != nil{
+    fmt.Printf("%s\r\n",err.Error())
+    os.Exit(-1)
+  }
+
+  // fmt.Printf("%s\r\n", execPath)
+
   print(fmt.Sprintf("ScrapBee Backend %s\n", version))
   
   /** log */
-	logfile,err:=os.OpenFile("scrapbee_backend.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
-  if err!=nil{
+	logfile, err := os.OpenFile( execPath + "scrapbee_backend.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+  if err != nil{
     fmt.Printf("%s\r\n",err.Error())
     os.Exit(-1)
   }
@@ -535,7 +565,6 @@ func main(){
     }
 	}
 }
-
 
 func getMsg (b []byte) int{
 	inputReader := bufio.NewReader(os.Stdin)	
